@@ -1,0 +1,737 @@
+<title>Симулятор дешифратора</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Onest:wght@400;500;600&family=Unbounded:wght@500;700&display=swap">
+<style>
+/* Схема идёт слева направо, потом вверх: переключатели и индикатор лежат в верхней полосе и видны сразу. */
+:root {
+  --bg: #060f20;
+  --panel: #0a1830;
+  --ink: #d9e8fc;
+  --muted: #8097b9;
+  --wire-off: #1b3257;
+  --wire-on: #2e8bff;
+  --head: #cfe7ff;
+  --gate-stroke: #4268a0;
+  --gate-fill: #0b1d3a;
+  --gate-on: #123a73;
+  --seg-off: #10223f;
+  --seg-on: #63b6ff;
+  --accent: #2e8bff;
+  --on-accent: #04101f;
+  --font-display: 'Unbounded', 'Onest', system-ui, sans-serif;
+  --font-body: 'Onest', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  color-scheme: dark;
+}
+html { background: var(--bg); }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 10;
+  background: var(--bg);
+}
+.wrap { max-width: 920px; margin-inline: auto; display: flex; flex-direction: column; gap: 18px; }
+h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(26px, 5vw, 38px);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  margin: 0 0 10px;
+  text-wrap: balance;
+}
+.lede { margin: 0; color: var(--muted); max-width: 62ch; }
+
+.bar {
+  background: var(--panel);
+  border: 1px solid var(--wire-off);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 5;
+}
+@media (min-width: 720px) {
+  .bar { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 8px); }
+}
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.tabs { display: flex; border: 1px solid var(--wire-off); border-radius: 8px; overflow: hidden; }
+.tabs button {
+  font: 600 14px var(--font-mono);
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.tabs button + button { border-left: 1px solid var(--wire-off); }
+.tabs button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.btn {
+  font: 500 14px var(--font-body);
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--gate-stroke);
+  border-radius: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.btn:hover, .tabs button:hover { border-color: var(--accent); }
+.tabs button[aria-pressed="false"]:hover { background: var(--gate-fill); }
+.btn[aria-pressed="true"] { background: var(--gate-on); border-color: var(--accent); }
+.btn.sq { width: 38px; padding-inline: 0; font: 600 18px var(--font-mono); line-height: 1; }
+button:focus-visible, select:focus-visible { outline: 2px solid var(--head); outline-offset: 2px; }
+.stepper { display: flex; align-items: center; gap: 6px; }
+.stepper output { min-width: 2.2ch; text-align: center; font: 700 16px var(--font-mono); }
+.speed { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+select {
+  font: 500 13px var(--font-body);
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--gate-stroke);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.readout { display: flex; flex-wrap: wrap; gap: 6px 26px; }
+.readout div { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.readout .k { font: 500 10.5px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.readout .v { font: 700 20px var(--font-mono); color: var(--head); font-variant-numeric: tabular-nums; min-width: 3ch; }
+
+.stage {
+  border: 1px solid var(--wire-off);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow-x: auto;
+  padding: 10px 0;
+}
+#circuit { display: block; margin-inline: auto; width: 100%; min-width: 540px; height: auto; }
+
+.w-base { fill: none; stroke: var(--wire-off); stroke-width: 2; stroke-linejoin: round; }
+.w-lit { fill: none; stroke: var(--wire-on); stroke-width: 3.2; stroke-linejoin: round; }
+.dot { fill: var(--gate-stroke); stroke: var(--panel); stroke-width: 1.5; }
+.dot.on { fill: var(--head); stroke: var(--wire-on); }
+.head { fill: var(--head); }
+.gate { fill: var(--gate-fill); stroke: var(--gate-stroke); stroke-width: 1.6; transition: fill 0.25s, stroke 0.25s; }
+.gate.on { fill: var(--gate-on); stroke: var(--wire-on); }
+.gtxt { font: 700 11px var(--font-mono); fill: var(--muted); text-anchor: middle; pointer-events: none; }
+.lamp { fill: var(--gate-fill); stroke: var(--gate-stroke); stroke-width: 1.4; transition: fill 0.25s; }
+.lamp.on { fill: var(--head); stroke: var(--wire-on); filter: drop-shadow(0 0 4px #7cc0ff); }
+.ylab { font: 500 10px var(--font-mono); fill: var(--muted); }
+.ylab.on { fill: var(--head); font-weight: 700; }
+.cap { font: 500 9.5px var(--font-mono); letter-spacing: 0.1em; fill: var(--muted); }
+.seglab { font: 500 10px var(--font-mono); fill: var(--muted); }
+.module { fill: var(--gate-fill); stroke: var(--gate-stroke); stroke-width: 1.6; }
+.pin { fill: var(--gate-stroke); }
+.seglet { font: 700 9px var(--font-mono); fill: var(--muted); text-anchor: middle; pointer-events: none; transition: fill 0.3s; }
+.seglet.on { fill: var(--on-accent); }
+.about { margin: 0; color: var(--muted); font-size: 14px; max-width: 78ch; }
+.about b { color: var(--ink); font-weight: 600; }
+.seg { fill: var(--seg-off); transition: fill 0.3s; }
+.seg.on { fill: var(--seg-on); filter: drop-shadow(0 0 6px rgba(99, 182, 255, 0.9)); }
+
+.sw { cursor: pointer; outline: none; }
+.sw .track { fill: var(--gate-fill); stroke: var(--gate-stroke); stroke-width: 1.6; transition: fill 0.2s, stroke 0.2s; }
+.sw .knob { fill: var(--muted); transition: transform 0.2s ease, fill 0.2s; }
+.sw .bit { font: 700 11px var(--font-mono); fill: var(--muted); text-anchor: middle; pointer-events: none; }
+.sw .name { font: 700 12px var(--font-mono); fill: var(--ink); text-anchor: middle; }
+.sw.on .track { fill: #14437f; stroke: var(--wire-on); }
+.sw.on .knob { transform: translateX(16px); fill: var(--head); }
+.sw.on .bit { fill: var(--head); }
+.sw:hover .track { stroke: var(--accent); }
+.sw:focus-visible .track { stroke: var(--head); stroke-width: 2.8; }
+
+.how { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px 24px; margin: 4px 0 0; padding: 0; list-style: none; }
+.how li { color: var(--muted); font-size: 14px; min-width: 0; }
+.how b { display: block; color: var(--ink); font-weight: 600; margin-bottom: 2px; }
+.how .n { font: 700 12px var(--font-mono); color: var(--accent); margin-right: 8px; }
+
+.tables { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 22px 32px; align-items: start; }
+@media (max-width: 760px) { .tables { grid-template-columns: minmax(0, 1fr); } }
+.tables h2 { font: 600 11px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.scroll { overflow-x: auto; }
+table.tt { border-collapse: collapse; font: 500 13px var(--font-mono); width: 100%; font-variant-numeric: tabular-nums; }
+.tt th, .tt td { padding: 4px 7px; text-align: center; border-bottom: 1px solid var(--wire-off); }
+.tt th { color: var(--muted); font-weight: 500; }
+.tt td.y { color: var(--muted); }
+.tt td.sg { color: var(--wire-off); }
+.tt td.sg.one { color: var(--seg-on); }
+.tt td.gl { font-weight: 700; }
+.tt tr.cur td { background: var(--gate-on); color: var(--head); }
+.tt tr.cur td.sg:not(.one) { color: var(--muted); }
+.fn { list-style: none; margin: 0 0 20px; padding: 0; display: flex; flex-direction: column; gap: 2px; font: 500 13px var(--font-mono); }
+.fn li { display: grid; grid-template-columns: 3.4em minmax(0, 1fr); gap: 0 8px; padding: 3px 8px; border-radius: 6px; color: var(--muted); }
+.fn .fy { font-weight: 700; }
+.fn .fx { color: var(--ink); overflow-wrap: anywhere; }
+.fn .fv { margin-left: 10px; font-variant-numeric: tabular-nums; }
+.fn li.on { background: var(--gate-on); color: var(--head); }
+.fn li.on .fx { color: var(--head); }
+.inv { text-decoration: overline; text-decoration-thickness: 1.5px; }
+.legend { margin: 0; color: var(--muted); font-size: 13px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gate, .lamp, .seg, .sw .track, .sw .knob { transition: none; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Дешифратор</h1>
+    <p class="lede">Переключайте входы на схеме или кнопками. Ток идёт по проводам шаг за шагом: входы, элементы НЕ, элементы И, элементы ИЛИ, и только потом загорается индикатор.</p>
+  </header>
+
+  <section class="bar" aria-label="Управление и состояние">
+    <div class="controls">
+      <div class="tabs" role="group" aria-label="Тип дешифратора">
+        <button type="button" id="tab2" data-n="2" aria-pressed="false">2 → 4</button>
+        <button type="button" id="tab3" data-n="3" aria-pressed="false">3 → 8</button>
+        <button type="button" id="tab4" data-n="4" aria-pressed="false">4 → 16</button>
+      </div>
+      <div class="stepper" role="group" aria-label="Число на входе">
+        <button type="button" class="btn sq" id="dec" aria-label="Предыдущее число">−</button>
+        <output id="val" for="dec inc">1</output>
+        <button type="button" class="btn sq" id="inc" aria-label="Следующее число">+</button>
+      </div>
+      <button type="button" class="btn" id="auto" aria-pressed="false">Автосчёт</button>
+      <label class="speed" for="spd">Скорость тока
+        <select id="spd">
+          <option value="0.5">Медленно</option>
+          <option value="1" selected>Обычно</option>
+          <option value="2">Быстро</option>
+          <option value="4">Очень быстро</option>
+        </select>
+      </label>
+    </div>
+    <div class="readout">
+      <div><span class="k">Вход</span><span class="v" id="ro-in">00</span></div>
+      <div><span class="k">Число</span><span class="v" id="ro-num">0</span></div>
+      <div><span class="k">Линия</span><span class="v" id="ro-y">—</span></div>
+      <div><span class="k">Индикатор</span><span class="v" id="ro-disp">—</span></div>
+    </div>
+  </section>
+
+  <div class="stage">
+    <svg id="circuit" role="img" aria-label="Схема дешифратора с семисегментным индикатором" xmlns="http://www.w3.org/2000/svg">
+      <desc>Входы A проходят напрямую и через элементы НЕ к элементам И, которые образуют линии Y. Элементы ИЛИ собирают линии в сегменты a–g семисегментного индикатора.</desc>
+    </svg>
+  </div>
+
+  <p class="legend">Жирная точка на пересечении означает, что провод подключён к шине. Там, где линии пересекаются без точки, контакта нет.</p>
+
+  <p class="about"><b>Индикатор:</b> семисегментный, с общим катодом. Сегмент горит, когда на его вход приходит 1. Есть и второй вид, с общим анодом: там сегмент горит при 0, поэтому сигналы пришлось бы инвертировать. Сегменты обозначены буквами: a сверху, затем по часовой стрелке b, c, d (снизу), e, f, а g посередине.</p>
+
+  <section class="tables" aria-label="Таблица истинности и функции">
+    <div>
+      <h2>Таблица истинности</h2>
+      <div class="scroll"><table class="tt" id="tt"></table></div>
+    </div>
+    <div>
+      <h2>Функции элементов И</h2>
+      <ul class="fn" id="fn-and"></ul>
+      <h2>Функции элементов ИЛИ</h2>
+      <ul class="fn" id="fn-or"></ul>
+      <p class="legend">Точка — И, плюс — ИЛИ, черта сверху — НЕ. Справа от каждой функции стоит результат для текущего числа на входе.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const NS = 'http://www.w3.org/2000/svg';
+  const SEGS = 'abcdefg';
+  const DIGITS = ['abcdef', 'bc', 'abdeg', 'abcdg', 'bcfg', 'acdfg', 'acdefg', 'abc', 'abcdefg', 'abcdfg', 'abcefg', 'cdefg', 'adef', 'bcdeg', 'adefg', 'aefg'];
+  const GLYPH = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'b', 'C', 'd', 'E', 'F'];
+  const SPEED_PX = 520;
+  const GATE_DELAY = 0.16;
+
+  const svg = document.getElementById('circuit');
+  const reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const state = { n: 2, value: 1, speed: 1, auto: false };
+  const active = new Set();
+  let C = null;
+  let gBase, gLit, gDot, gGate, gHead, gTop;
+  let running = false, last = 0, autoTimer = null;
+
+  const el = (tag, attrs, parent) => {
+    const e = document.createElementNS(NS, tag);
+    if (attrs) for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  };
+  const text = (parent, x, y, str, cls, extra) => {
+    const t = el('text', Object.assign({ x, y, class: cls }, extra || {}), parent);
+    t.textContent = str;
+    return t;
+  };
+
+  /* ---------- провода ---------- */
+  function mkWire(pts, stage) {
+    const d = 'M' + pts.map(p => p[0] + ' ' + p[1]).join(' L');
+    el('path', { d, class: 'w-base' }, gBase);
+    const lit = el('path', { d, class: 'w-lit', visibility: 'hidden' }, gLit);
+    const seg = [];
+    let L = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      seg.push(l);
+      L += l;
+    }
+    const w = { pts, seg, L, stage, a: 0, b: 0, target: 0, dstVal: 0, lit, dst: null, dots: [], head: null, anim: false };
+    C.wires.push(w);
+    C.byStage[stage].push(w);
+    return w;
+  }
+  function pointAt(w, s) {
+    let rest = s;
+    for (let i = 0; i < w.seg.length; i++) {
+      if (rest <= w.seg[i] || i === w.seg.length - 1) {
+        const f = w.seg[i] ? Math.min(1, rest / w.seg[i]) : 0;
+        const p = w.pts[i], q = w.pts[i + 1];
+        return [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
+      }
+      rest -= w.seg[i];
+    }
+    return w.pts[w.pts.length - 1];
+  }
+  function addDot(w, x, y, dist) {
+    const c = el('circle', { cx: x, cy: y, r: C.n === 4 ? 4 : 5, class: 'dot' }, gDot);
+    w.dots.push({ c, f: dist / w.L, on: false });
+  }
+  function render(w) {
+    const a = w.a, b = w.b, L = w.L;
+    const lit = b - a >= 0.001;
+    if (!lit) {
+      w.lit.setAttribute('visibility', 'hidden');
+    } else {
+      w.lit.setAttribute('visibility', 'visible');
+      if (a <= 0 && b >= 1) w.lit.removeAttribute('stroke-dasharray');
+      else w.lit.setAttribute('stroke-dasharray', '0 ' + (a * L) + ' ' + ((b - a) * L) + ' ' + (L * 3));
+    }
+    for (const d of w.dots) {
+      const on = lit && a <= d.f + 1e-6 && b >= d.f - 1e-6;
+      if (on !== d.on) { d.on = on; d.c.classList.toggle('on', on); }
+    }
+    if (w.target === 1 && b > 0 && b < 1) {
+      if (!w.head) w.head = el('circle', { r: 3.4, class: 'head' }, gHead);
+      const p = pointAt(w, b * L);
+      w.head.setAttribute('cx', p[0]);
+      w.head.setAttribute('cy', p[1]);
+      w.head.setAttribute('visibility', 'visible');
+    } else if (w.head) {
+      w.head.setAttribute('visibility', 'hidden');
+    }
+  }
+  function drive(w, v) {
+    if (w.target === v) return;
+    w.target = v;
+    w.anim = true;
+    active.add(w);
+  }
+  function force(w, v) {
+    w.target = v; w.a = 0; w.b = v; w.dstVal = v; w.anim = false;
+    active.delete(w);
+    render(w);
+  }
+  function advance(w, t) {
+    const da = t * SPEED_PX / w.L;
+    if (w.target === 1) {
+      if (w.a > 0) w.a = Math.max(0, w.a - da);
+      if (w.b < 1) w.b = Math.min(1, w.b + da);
+      if (w.b >= 1) w.dstVal = 1;
+      if (w.a <= 0 && w.b >= 1) { w.anim = false; active.delete(w); }
+    } else {
+      w.a = Math.min(w.b, w.a + da);
+      if (w.a >= w.b) { w.a = 0; w.b = 0; w.dstVal = 0; w.anim = false; active.delete(w); }
+    }
+    render(w);
+  }
+
+  /* ---------- логика ---------- */
+  const calc = {
+    not: n => (n.in.dstVal ? 0 : 1),
+    and: n => (n.ins.every(w => w.dstVal) ? 1 : 0),
+    or: n => (n.ins.some(w => w.dstVal) ? 1 : 0)
+  };
+  function paint(nd) {
+    if (nd.shape) nd.shape.classList.toggle('on', !!nd.out);
+    if (nd.lamp) nd.lamp.classList.toggle('on', !!nd.out);
+    if (nd.lab) nd.lab.classList.toggle('on', !!nd.out);
+  }
+  function fire(nd) {
+    const v = calc[nd.type](nd);
+    nd.timer = null;
+    if (v !== nd.out) {
+      nd.out = v;
+      paint(nd);
+      for (const w of nd.outWires) drive(w, v);
+    }
+  }
+  function idle(s) {
+    for (const w of C.byStage[s]) if (w.anim) return false;
+    for (const nd of C.groups[s]) if (nd.timer !== null || calc[nd.type](nd) !== nd.out) return false;
+    return true;
+  }
+  function paintSw(sw) {
+    sw.g.classList.toggle('on', !!sw.out);
+    sw.g.setAttribute('aria-checked', sw.out ? 'true' : 'false');
+    sw.bitText.textContent = sw.out ? '1' : '0';
+    sw.bitText.setAttribute('x', sw.out ? 13 : 33);
+  }
+  function litPattern() {
+    return SEGS.split('').filter((_, i) => C.segs[i].on).join('');
+  }
+  /* ---------- таблица истинности и функции ---------- */
+  function buildTables(n) {
+    const R = 1 << n;
+    let h = '<thead><tr>';
+    for (let b = n - 1; b >= 0; b--) h += '<th scope="col">A' + b + '</th>';
+    h += '<th scope="col">Y</th>';
+    for (const s of SEGS) h += '<th scope="col">' + s + '</th>';
+    h += '<th scope="col">Знак</th></tr></thead><tbody>';
+    for (let k = 0; k < R; k++) {
+      h += '<tr data-k="' + k + '">';
+      for (let b = n - 1; b >= 0; b--) h += '<td>' + ((k >> b) & 1) + '</td>';
+      h += '<td class="y">Y' + k + '</td>';
+      for (const s of SEGS) {
+        const one = DIGITS[k].indexOf(s) >= 0;
+        h += '<td class="sg' + (one ? ' one' : '') + '">' + (one ? 1 : 0) + '</td>';
+      }
+      h += '<td class="gl">' + GLYPH[k] + '</td></tr>';
+    }
+    document.getElementById('tt').innerHTML = h + '</tbody>';
+
+    let fa = '';
+    for (let k = 0; k < R; k++) {
+      const terms = [];
+      for (let b = n - 1; b >= 0; b--) terms.push(((k >> b) & 1) ? 'A' + b : '<span class="inv">A' + b + '</span>');
+      fa += '<li data-k="' + k + '"><span class="fy">Y' + k + '</span><span><span class="fx">' + terms.join(' · ') + '</span><span class="fv"></span></span></li>';
+    }
+    document.getElementById('fn-and').innerHTML = fa;
+
+    let fo = '';
+    for (let s = 0; s < 7; s++) {
+      const ys = [];
+      for (let k = 0; k < R; k++) if (DIGITS[k].indexOf(SEGS[s]) >= 0) ys.push('Y' + k);
+      fo += '<li data-s="' + s + '"><span class="fy">' + SEGS[s] + '</span><span><span class="fx">' + ys.join(' + ') + '</span><span class="fv"></span></span></li>';
+    }
+    document.getElementById('fn-or').innerHTML = fo;
+  }
+  function updateTables() {
+    const n = C.n, v = state.value;
+    for (const tr of document.querySelectorAll('#tt tbody tr')) tr.classList.toggle('cur', +tr.dataset.k === v);
+    for (const li of document.querySelectorAll('#fn-and li')) {
+      const k = +li.dataset.k;
+      const vals = [];
+      let res = 1;
+      for (let b = n - 1; b >= 0; b--) {
+        const bit = (v >> b) & 1;
+        const lit = ((k >> b) & 1) ? bit : 1 - bit;
+        vals.push(lit);
+        res &= lit;
+      }
+      li.classList.toggle('on', !!res);
+      li.querySelector('.fv').textContent = '= ' + vals.join('·') + ' = ' + res;
+    }
+    for (const li of document.querySelectorAll('#fn-or li')) {
+      const s = +li.dataset.s;
+      const res = DIGITS[v].indexOf(SEGS[s]) >= 0 ? 1 : 0;
+      li.classList.toggle('on', !!res);
+      li.querySelector('.fv').textContent = '= ' + res;
+    }
+  }
+
+  let lastRead = '';
+  function updateReadout() {
+    const n = C.n;
+    const bits = [];
+    for (let b = n - 1; b >= 0; b--) bits.push((state.value >> b) & 1);
+    const y = C.ands.filter(a => a.out).map(a => 'Y' + a.k).join(' ') || '—';
+    const pat = litPattern();
+    const gi = DIGITS.indexOf(pat);
+    const disp = gi >= 0 && gi < C.R ? GLYPH[gi] : '—';
+    const dec = state.value > 9 ? state.value + ' (' + GLYPH[state.value] + ')' : String(state.value);
+    const s = bits.join('') + '|' + dec + '|' + y + '|' + disp;
+    if (s === lastRead) return;
+    lastRead = s;
+    updateTables();
+    document.getElementById('ro-in').textContent = bits.join('');
+    document.getElementById('ro-num').textContent = dec;
+    document.getElementById('ro-y').textContent = y;
+    document.getElementById('ro-disp').textContent = disp;
+  }
+
+  function step(dt) {
+    const t = dt * state.speed;
+    for (const w of Array.from(active)) advance(w, t);
+    for (let s = 0; s < 3; s++) {
+      const open = s === 0 || idle(s - 1);
+      for (const nd of C.groups[s]) {
+        const want = calc[nd.type](nd);
+        if (nd.timer === null) {
+          if (open && want !== nd.out) nd.timer = GATE_DELAY;
+        } else if (want === nd.out) {
+          nd.timer = null;
+        }
+        if (nd.timer !== null) {
+          nd.timer -= t;
+          if (nd.timer <= 0) fire(nd);
+        }
+      }
+    }
+    for (const sg of C.segs) {
+      const on = sg.in.dstVal;
+      if (on !== sg.on) { sg.on = on; sg.poly.classList.toggle('on', !!on); sg.lt.classList.toggle('on', !!on); }
+    }
+    updateReadout();
+    if (active.size > 0) return true;
+    for (let s = 0; s < 3; s++) {
+      for (const nd of C.groups[s]) if (nd.timer !== null || calc[nd.type](nd) !== nd.out) return true;
+    }
+    return false;
+  }
+
+  function settle() {
+    active.clear();
+    for (const sw of C.sws) {
+      sw.out = (state.value >> sw.bit) & 1;
+      paintSw(sw);
+      for (const w of sw.outWires) force(w, sw.out);
+    }
+    for (const nd of C.nots) {
+      nd.timer = null; nd.out = calc.not(nd); paint(nd);
+      for (const w of nd.outWires) force(w, nd.out);
+    }
+    for (const nd of C.ands) {
+      nd.timer = null; nd.out = calc.and(nd); paint(nd);
+      for (const w of nd.outWires) force(w, nd.out);
+    }
+    for (const nd of C.ors) {
+      nd.timer = null; nd.out = calc.or(nd); paint(nd);
+      for (const w of nd.outWires) force(w, nd.out);
+    }
+    for (const sg of C.segs) {
+      sg.on = sg.in.dstVal;
+      sg.poly.classList.toggle('on', !!sg.on);
+      sg.lt.classList.toggle('on', !!sg.on);
+    }
+    lastRead = '';
+    updateReadout();
+  }
+
+  /* ---------- цикл анимации ---------- */
+  function kick() {
+    if (running) return;
+    running = true;
+    last = performance.now();
+    requestAnimationFrame(frame);
+  }
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (step(dt)) requestAnimationFrame(frame);
+    else { running = false; onIdle(); }
+  }
+  function onIdle() {
+    clearTimeout(autoTimer);
+    if (state.auto) {
+      autoTimer = setTimeout(() => {
+        if (state.auto) setValue((state.value + 1) % C.R);
+      }, 1100);
+    }
+  }
+
+  function setValue(v) {
+    state.value = v;
+    document.getElementById('val').textContent = v;
+    clearTimeout(autoTimer);
+    if (reduce) { settle(); return; }
+    for (const sw of C.sws) {
+      const bit = (v >> sw.bit) & 1;
+      if (sw.out !== bit) {
+        sw.out = bit;
+        paintSw(sw);
+        for (const w of sw.outWires) drive(w, bit);
+      }
+    }
+    updateReadout();
+    kick();
+  }
+
+  /* ---------- построение схемы ---------- */
+  function hexSeg(x1, y1, x2, y2) {
+    const h = 7;
+    if (y1 === y2) return [[x1, y1], [x1 + h, y1 - h], [x2 - h, y1 - h], [x2, y1], [x2 - h, y1 + h], [x1 + h, y1 + h]].join(' ');
+    return [[x1, y1], [x1 + h, y1 + h], [x1 + h, y2 - h], [x1, y2], [x1 - h, y2 - h], [x1 - h, y1 + h]].join(' ');
+  }
+
+  function build(n) {
+    const R = 1 << n;
+    const pitch = n === 2 ? 74 : n === 3 ? 58 : 44;
+    const pinSp = n === 2 ? 11 : n === 3 ? 8.5 : 6.5;
+    const gH = n === 2 ? 30 : 32;
+    const rowsTop = 320, yOrIn = 278, modBottom = 204;
+    const swTop = 36, swBottom = 66, splitY = 90, notTop = 104, notOut = 126;
+    const busX0 = 54, pair = 62, off = 26;
+    const xT = j => busX0 + j * pair;
+    const xC = j => xT(j) + off;
+    const gateX = xC(n - 1) + 36, gW = 46, gOut = gateX + gW;
+    const mX0 = gOut + 76, colP = 30;
+    const xS = s => mX0 + s * colP;
+    const xMid = (xS(0) + xS(6)) / 2;
+    const W = Math.round(xMid + 127 + 16);
+    const H = rowsTop + R * pitch + 18;
+    const yk = k => rowsTop + pitch * (k + 0.5);
+
+    svg.innerHTML = '';
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.style.maxWidth = Math.round(W * 1.15) + 'px';
+    el('desc', null, svg).textContent = 'Дешифратор ' + n + ' → ' + R + ' с семисегментным индикатором';
+    gBase = el('g', null, svg);
+    gLit = el('g', { class: 'layer-lit' }, svg);
+    gDot = el('g', null, svg);
+    gGate = el('g', null, svg);
+    gHead = el('g', null, svg);
+    gTop = el('g', null, svg);
+    active.clear();
+
+    C = { n, R, wires: [], byStage: [[], [], []], sws: [], nots: [], ands: [], ors: [], segs: [], groups: [] };
+    C.groups = [C.nots, C.ands, C.ors];
+    buildTables(n);
+
+    /* входы и инверторы */
+    for (let j = 0; j < n; j++) {
+      const bit = n - 1 - j;
+      const x = xT(j), xc = xC(j);
+      const g = el('g', { class: 'sw', tabindex: '0', role: 'switch', 'aria-checked': 'false', 'aria-label': 'Вход A' + bit, transform: 'translate(' + (x - 10) + ' ' + swTop + ')' }, gTop);
+      el('rect', { class: 'track', x: 0, y: 0, width: 46, height: 30, rx: 15 }, g);
+      el('circle', { class: 'knob', cx: 15, cy: 15, r: 10 }, g);
+      const bitText = text(g, 33, 19.5, '0', 'bit');
+      text(g, 23, -8, 'A' + bit, 'name');
+      const sw = { bit, out: 0, g, bitText, outWires: [] };
+      const toggle = () => setValue(state.value ^ (1 << bit));
+      g.addEventListener('click', toggle);
+      g.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); } });
+      C.sws.push(sw);
+
+      const not = { type: 'not', j, in: null, out: 1, timer: null, outWires: [], stage: 0 };
+      const toNot = mkWire([[x, swBottom], [x, splitY], [xc, splitY], [xc, notTop]], 0);
+      toNot.dst = not;
+      not.in = toNot;
+      sw.outWires.push(toNot);
+      addDot(toNot, x, splitY, splitY - swBottom);
+      not.shape = el('path', { class: 'gate', d: 'M' + (xc - 9) + ' ' + notTop + ' H' + (xc + 9) + ' L' + xc + ' ' + (notTop + 16) + ' Z' }, gGate);
+      el('circle', { class: 'gate', cx: xc, cy: notTop + 19, r: 3 }, gGate);
+      C.nots.push(not);
+    }
+    text(gTop, xC(0) + 12, 120, 'НЕ', 'cap');
+
+    /* элементы ИЛИ и индикатор */
+    for (let s = 0; s < 7; s++) {
+      const x = xS(s);
+      const or = { type: 'or', s, ins: [], out: 0, timer: null, outWires: [], stage: 2 };
+      or.shape = el('path', { class: 'gate', d: 'M' + (x - 11) + ' ' + yOrIn + ' Q' + x + ' ' + (yOrIn - 10) + ' ' + (x + 11) + ' ' + yOrIn + ' Q' + (x + 11) + ' ' + (yOrIn - 16) + ' ' + x + ' ' + (yOrIn - 28) + ' Q' + (x - 11) + ' ' + (yOrIn - 16) + ' ' + (x - 11) + ' ' + yOrIn + ' Z' }, gGate);
+      text(gGate, x, yOrIn - 8, '≥1', 'gtxt').setAttribute('style', 'font-size:8px');
+      text(gTop, x + 9, yOrIn - 30, SEGS[s], 'seglab');
+      el('path', { d: 'M' + x + ' ' + rowsTop + ' V' + yOrIn, class: 'w-base' }, gBase);
+      C.ors.push(or);
+    }
+    text(gTop, xS(0) - 20, yOrIn - 12, 'ИЛИ', 'cap').setAttribute('text-anchor', 'end');
+
+    const modX = xMid - 127;
+    el('rect', { class: 'module', x: modX, y: 12, width: 254, height: modBottom - 12, rx: 10 }, gGate);
+    text(gTop, modX + 14, 28, 'ИНДИКАТОР', 'cap');
+    const dg = el('g', { transform: 'translate(' + (xMid - 50) + ' 38)' }, gGate);
+    const segGeo = { a: [10, 7, 90, 7], b: [93, 10, 93, 75], c: [93, 81, 93, 146], d: [10, 149, 90, 149], e: [7, 81, 7, 146], f: [7, 10, 7, 75], g: [10, 78, 90, 78] };
+    for (let s = 0; s < 7; s++) {
+      const gg = segGeo[SEGS[s]];
+      const poly = el('polygon', { class: 'seg', points: hexSeg(gg[0], gg[1], gg[2], gg[3]) }, dg);
+      const w = mkWire([[xS(s), yOrIn - 28], [xS(s), modBottom]], 2);
+      C.ors[s].outWires.push(w);
+      const lt = text(dg, (gg[0] + gg[2]) / 2, (gg[1] + gg[3]) / 2 + 3.2, SEGS[s], 'seglet');
+      const sg = { s, in: w, on: 0, poly, lt };
+      w.dst = sg;
+      C.segs.push(sg);
+      el('circle', { class: 'pin', cx: xS(s), cy: modBottom, r: 3 }, gGate);
+    }
+
+    /* дешифратор: элементы И */
+    text(gTop, gateX + gW / 2, rowsTop - 12, 'ДЕШИФРАТОР · И', 'cap').setAttribute('text-anchor', 'middle');
+    for (let k = 0; k < R; k++) {
+      const y = yk(k);
+      const and = { type: 'and', k, ins: [], out: 0, timer: null, outWires: [], stage: 1 };
+      const top = y - gH / 2, r = gH / 2;
+      and.shape = el('path', { class: 'gate', d: 'M' + gateX + ' ' + top + ' H' + (gOut - r) + ' A' + r + ' ' + r + ' 0 0 1 ' + (gOut - r) + ' ' + (top + gH) + ' H' + gateX + ' Z' }, gGate);
+      text(gGate, gateX + (gW - r) / 2 + 2, y + 4, '&', 'gtxt');
+      for (let j = 0; j < n; j++) {
+        const bit = n - 1 - j, one = (k >> bit) & 1;
+        const py = y + (j - (n - 1) / 2) * pinSp;
+        const sx = one ? xT(j) : xC(j), sy = one ? swBottom : notOut;
+        const w = mkWire([[sx, sy], [sx, py], [gateX, py]], 0);
+        w.dst = and;
+        and.ins.push(w);
+        addDot(w, sx, py, py - sy);
+        (one ? C.sws[j] : C.nots[j]).outWires.push(w);
+      }
+      el('path', { d: 'M' + gOut + ' ' + y + ' H' + xS(6), class: 'w-base' }, gBase);
+      and.lamp = el('circle', { class: 'lamp', cx: gOut + 46, cy: y, r: 4.2 }, gGate);
+      and.lab = text(gTop, gOut + 8, y - 6, 'Y' + k, 'ylab');
+      for (const ch of DIGITS[k]) {
+        const s = SEGS.indexOf(ch);
+        const w = mkWire([[gOut, y], [xS(s), y], [xS(s), yOrIn]], 1);
+        w.dst = C.ors[s];
+        C.ors[s].ins.push(w);
+        and.outWires.push(w);
+        addDot(w, xS(s), y, xS(s) - gOut);
+      }
+      C.ands.push(and);
+    }
+  }
+
+  /* ---------- управление ---------- */
+  function setN(n) {
+    state.n = n;
+    clearTimeout(autoTimer);
+    running = false;
+    build(n);
+    state.value = state.value % (1 << n);
+    document.getElementById('val').textContent = state.value;
+    settle();
+    for (const b of document.querySelectorAll('.tabs button')) b.setAttribute('aria-pressed', String(+b.dataset.n === n));
+    onIdle();
+  }
+  for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => setN(+b.dataset.n));
+  document.getElementById('inc').addEventListener('click', () => setValue((state.value + 1) % C.R));
+  document.getElementById('dec').addEventListener('click', () => setValue((state.value + C.R - 1) % C.R));
+  document.getElementById('spd').addEventListener('change', e => { state.speed = +e.target.value; });
+  document.getElementById('auto').addEventListener('click', e => {
+    state.auto = !state.auto;
+    e.currentTarget.setAttribute('aria-pressed', String(state.auto));
+    e.currentTarget.textContent = state.auto ? 'Стоп' : 'Автосчёт';
+    clearTimeout(autoTimer);
+    if (state.auto) autoTimer = setTimeout(() => { if (state.auto && !running) setValue((state.value + 1) % C.R); }, 300);
+  });
+
+  setN(2);
+
+  window.__dbg = {
+    setN,
+    setValue,
+    step,
+    state,
+    snapshot: () => ({ segs: litPattern(), y: C.ands.filter(a => a.out).map(a => a.k), wiresAnim: active.size }),
+    settleNow: () => { settle(); }
+  };
+})();
+</script>
